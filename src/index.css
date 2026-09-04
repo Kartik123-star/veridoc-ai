@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-ink: #04070d;
+  --color-panel: #0a111e;
+  --color-panel-2: #0e1728;
+  --color-line: #1c2a44;
+
+  --animate-fade-up: fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-scanline: scanline 2.6s linear infinite;
+  --animate-pulse-soft: pulse-soft 2.2s ease-in-out infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes scanline {
+    0% {
+      top: 3%;
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    90% {
+      opacity: 1;
+    }
+    100% {
+      top: 95%;
+      opacity: 0;
+    }
+  }
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+body {
+  background: var(--color-ink);
+  color: #f1f5f9;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #243455 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #243455;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Faint cyber-grid backdrop used behind the hero */
+.bg-grid {
+  background-image: linear-gradient(rgba(56, 189, 248, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.045) 1px, transparent 1px);
+  background-size: 38px 38px;
+}
+
+/* Animated progress shimmer for the analysis run */
+.shimmer-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(16, 185, 129, 0.12),
+    rgba(34, 211, 238, 0.5),
+    rgba(16, 185, 129, 0.12)
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 22px rgba(34, 211, 238, 0.5);
+}
+.text-glow-emerald {
+  text-shadow: 0 0 22px rgba(52, 211, 153, 0.5);
+}
+.text-glow-red {
+  text-shadow: 0 0 22px rgba(248, 113, 113, 0.55);
+}

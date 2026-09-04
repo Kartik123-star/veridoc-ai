@@ -1,0 +1,24 @@
+{
+  "name": "veridoc-ai",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "VeriDoc AI — AI-based fake identity & document screening for government and border security (SIH 2026 · SIH26188).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dossier": "node generate-dossier.mjs"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "pdfkit": "^0.20.2",
+    "tailwindcss": "^4.1.0",
+    "vite": "^7.0.0"
+  }
+}
