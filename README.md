@@ -10,7 +10,7 @@
 ---
 
 ## 🌐 Live Interactive Deployment
-- **Production Web Application:** [https://spades.vercel.app](https://spades.vercel.app)
+- **Production Web Application:** [https://s-eight-lake.vercel.app/](https://s-eight-lake.vercel.app/)
 
 ---
 
