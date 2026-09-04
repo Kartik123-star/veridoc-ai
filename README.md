@@ -10,7 +10,7 @@
 ---
 
 ## 🌐 Live Interactive Deployment
-- **Production Web Application:** [https://spades.vercel.app](https://spades.vercel.app) *(Update with your exact Vercel link)*
+- **Production Web Application:** [https://spades.vercel.app](https://spades.vercel.app)
 
 ---
 
@@ -36,7 +36,18 @@ VeriDoc AI is an automated, real-time forensic screening platform engineered for
 ## 🚀 Local Development Setup
 
 To run the client interface locally:
-
 1. **Clone the repository:**
    ```bash
-  git clone [https://github.com/Kartik123-star/veridoc-ai.git](https://github.com/Kartik123-star/veridoc-ai.git)
+   git clone https://github.com/Kartik123-star/veridoc-ai.git
+   cd veridoc-ai
+   ```
+2. **Install dependencies:**
+    ```bash
+   npm install
+     ```
+3. **Launch local dev server:**
+    ```bash
+   npm run dev
+    ```
+4. **Access the application:**
+   Open `http://localhost:5173` in your browser.
