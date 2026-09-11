@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DOC_TYPES } from "../data/sampleData";
 import { generateResult, preflightFile, SIM_MODES } from "../lib/forensics";
+import { createWorker } from "tesseract.js";
 
 const PHASES = [
   { label: "Optical Character Recognition", sub: "Extracting text & field regions from document" },
@@ -30,9 +31,9 @@ export default function Scanner({ onResult }) {
   const [useSample, setUseSample] = useState(false);
   const [docType, setDocType] = useState(DOC_TYPES[0]);
   const [simMode, setSimMode] = useState("auto");
-  const [preflight, setPreflight] = useState(null); // { reason, detail } when upload is clearly not an ID
+  const [preflight, setPreflight] = useState(null);
   const [drag, setDrag] = useState(false);
-  const [status, setStatus] = useState("idle"); // idle | running | done
+  const [status, setStatus] = useState("idle");
   const [phase, setPhase] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const inputRef = useRef(null);
@@ -93,15 +94,165 @@ export default function Scanner({ onResult }) {
     const ms = Math.round(performance.now() - started);
     setElapsed(ms);
     setStatus("done");
-    setPhase(PHASES.length - 1);
-    onResult(generateResult(docType, ms, { mode: simMode, preflight }), { url: sample ? null : url, useSample: sample });
+
+    let extractedText = "";
+    try {
+      const targetImg = file || url;
+      if (targetImg) {
+        const worker = await createWorker("eng");
+        const ret = await worker.recognize(targetImg);
+        extractedText = (ret.data.text || "").toLowerCase();
+        await worker.terminate();
+      }
+    } catch (err) {
+      console.warn("OCR recognition error:", err);
+    }
+
+    const uploadedName = (file?.name || "").toLowerCase();
+    const activeUrl = (url || "").toLowerCase();
+    const combinedText = `${extractedText} ${uploadedName} ${activeUrl}`;
+
+    const hasAadhaarKeywords =
+      combinedText.includes("government of india") ||
+      combinedText.includes("unique identification") ||
+      combinedText.includes("uidai") ||
+      combinedText.includes("aadhaar") ||
+      combinedText.includes("aadhar") ||
+      combinedText.includes("mera aadhaar");
+
+    const hasPanKeywords =
+      combinedText.includes("income tax") ||
+      combinedText.includes("permanent account") ||
+      combinedText.includes("tax department");
+
+    const hasVoterKeywords =
+      combinedText.includes("election commission") ||
+      combinedText.includes("elector photo") ||
+      combinedText.includes("identity card") ||
+      combinedText.includes("epic");
+
+    const hasPassportKeywords =
+      combinedText.includes("passport") ||
+      combinedText.includes("republic of india") ||
+      combinedText.includes("type p") ||
+      combinedText.includes("p<ind");
+
+    const lines = extractedText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 1);
+
+    let mrzName = "";
+    const mrzMatch = extractedText.match(/P<IND([A-Z<]+)/i);
+    if (mrzMatch) {
+      const cleanParts = mrzMatch[1]
+        .split("<")
+        .filter((part) => part.trim().length > 0);
+      if (cleanParts.length > 0) {
+        mrzName = cleanParts
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+          .join(" ");
+      }
+    }
+
+    let detectedDocNo = null;
+    const passportTopMatch = extractedText.match(/\b([A-PR-WYZ][0-9]{7})\b/i);
+    const aadhaarMatch = extractedText.match(/\b\d{4}\s?\d{4}\s?\d{4}\b/);
+    const panMatch = extractedText.toUpperCase().match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/);
+    const voterMatch = extractedText.toUpperCase().match(/\b[A-Z]{3}[0-9]{7}\b/);
+
+    if (hasPassportKeywords && passportTopMatch) {
+      detectedDocNo = passportTopMatch[1].toUpperCase();
+    } else if (hasPanKeywords && panMatch) {
+      detectedDocNo = panMatch[0];
+    } else if (hasVoterKeywords && voterMatch) {
+      detectedDocNo = voterMatch[0];
+    } else if (aadhaarMatch) {
+      detectedDocNo = `XXXX XXXX ${aadhaarMatch[0].replace(/\s+/g, "").slice(-4)}`;
+    }
+
+    let parsedName = "";
+    if (mrzName) {
+      parsedName = mrzName;
+    } else {
+      const blockedWords = [
+        "government", "india", "income", "tax", "department", "permanent",
+        "account", "card", "father", "name", "female", "male", "dob", "birth",
+        "election", "commission", "republic", "passport", "signature",
+        "nationality", "arevam", "date", "bih", "sex", "place"
+      ];
+
+      const dobIndex = lines.findIndex((l) => /dob|birth|\d{2}[\/-]\d{2}/i.test(l));
+      if (dobIndex > 0) {
+        for (let i = dobIndex - 1; i >= 0; i--) {
+          const candidate = lines[i].replace(/[^a-zA-Z\s]/g, "").trim();
+          const lower = candidate.toLowerCase();
+          const isStopword = blockedWords.some((w) => lower.includes(w));
+          if (candidate.length >= 3 && !isStopword && candidate.split(/\s+/).length <= 4) {
+            parsedName = candidate;
+            break;
+          }
+        }
+      }
+
+      if (!parsedName) {
+        const nameCandidate = lines.find((l) => {
+          const cleaned = l.replace(/[^a-zA-Z\s]/g, "").trim();
+          const lower = cleaned.toLowerCase();
+          return (
+            /^[A-Z][a-z]+(\s[A-Z][a-z]+)+$/.test(cleaned) &&
+            !blockedWords.some((w) => lower.includes(w))
+          );
+        });
+        if (nameCandidate) parsedName = nameCandidate;
+      }
+    }
+
+    const dateMatch = extractedText.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/);
+    const parsedDate = dateMatch ? dateMatch[1] : null;
+
+    const selected = String(docType || "").toLowerCase();
+    const detectedDocType = hasAadhaarKeywords
+      ? "aadhaar"
+      : hasPanKeywords
+      ? "pan"
+      : hasVoterKeywords
+      ? "voter"
+      : hasPassportKeywords
+      ? "passport"
+      : null;
+
+    const isMismatch =
+      detectedDocType &&
+      !selected.includes(detectedDocType);
+
+    if (isMismatch) {
+      onResult(
+        {
+          ...generateResult(docType, ms, { mode: "invalid", preflight }),
+          score: 0,
+          verdict: "Rejected",
+          status: "DOCUMENT_TYPE_MISMATCH",
+          flagReason: `Uploaded file identified as ${detectedDocType.toUpperCase()}, but expected ${selected.toUpperCase()}.`,
+        },
+        { url: sample ? null : url, useSample: sample }
+      );
+      return;
+    }
+
+    const result = generateResult(docType, ms, { mode: preflight ? "invalid" : simMode, preflight });
+    if (parsedName) result.name = parsedName;
+    if (parsedDate) result.issueDate = parsedDate;
+    if (detectedDocNo) result.docNumber = detectedDocNo;
+
+    onResult(result, { url: sample ? null : url, useSample: sample });
   };
 
   const progress = status === "running" ? ((phase + 1) / PHASES.length) * 100 : status === "done" ? 100 : 0;
-  const hasInput = !!file || useSample;
+  const hasInput = Boolean(file || useSample);
 
   return (
-    <section id="scanner" className="animate-fade-up">
+    <section id="scanner" className="relative z-10 my-8 w-full max-w-5xl mx-auto px-4 opacity-100">
       {/* Dropzone */}
       <div
         onDragOver={(e) => {
@@ -119,10 +270,10 @@ export default function Scanner({ onResult }) {
           drag
             ? "border-cyan-400 bg-cyan-500/10"
             : preflight
-              ? "border-red-500/40 bg-red-500/5"
-              : file || useSample
-                ? "border-emerald-500/40 bg-emerald-500/5"
-                : "border-line bg-panel/70 hover:border-cyan-500/40 hover:bg-panel"
+            ? "border-red-500/40 bg-red-500/5"
+            : file || useSample
+            ? "border-emerald-500/40 bg-emerald-500/5"
+            : "border-slate-700 bg-slate-900/90 hover:border-cyan-500/60 hover:bg-slate-900"
         }`}
       >
         <input
@@ -154,13 +305,13 @@ export default function Scanner({ onResult }) {
               </span>
             )}
             <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-panel-2 text-slate-300">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-slate-300">
                 {useSample ? (
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <rect x="4" y="5" width="16" height="14" rx="2" />
                     <path d="M4 15l4-4 3 3 3-4 6 5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                ) : file.type === "application/pdf" ? (
+                ) : file?.type === "application/pdf" ? (
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <path d="M7 3h7l4 4v14H7V3z" strokeLinejoin="round" />
                     <path d="M14 3v4h4" strokeLinejoin="round" />
@@ -175,13 +326,13 @@ export default function Scanner({ onResult }) {
               </span>
               <span className="text-left">
                 <span className="block text-sm font-semibold text-slate-100">
-                  {useSample ? "Sample document (demo corpus)" : file.name}
+                  {useSample ? "Sample document (demo corpus)" : file?.name}
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-slate-500">
-                  {useSample ? docType + " · 2.4 MB · SHA-256 verified" : `${docType} · ${formatSize(file.size)}`}
+                  {useSample ? docType + " · 2.4 MB · SHA-256 verified" : `${docType} · ${formatSize(file?.size || 0)}`}
                   {simMode !== "auto" && (
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${SIM_STYLE[simMode].badge}`}>
-                      SIM · {SIM_MODES.find((m) => m.value === simMode).label.toUpperCase()}
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${SIM_STYLE[simMode]?.badge || ""}`}>
+                      SIM · {(SIM_MODES?.find((m) => m.value === simMode)?.label || simMode).toUpperCase()}
                     </span>
                   )}
                   {preflight && (
@@ -197,7 +348,7 @@ export default function Scanner({ onResult }) {
                   setUseSample(false);
                   setStatus("idle");
                 }}
-                className="rounded-lg border border-line bg-panel px-2 py-1 text-slate-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-slate-400 transition-colors hover:border-red-500/40 hover:text-red-400"
                 title="Remove"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
@@ -217,7 +368,7 @@ export default function Scanner({ onResult }) {
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-panel-2 text-cyan-400 transition-transform group-hover:scale-105">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800 text-cyan-400 transition-transform group-hover:scale-105">
               <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.7">
                 <path d="M12 16V4m0 0L7 9m5-5l5 5" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" strokeLinecap="round" />
@@ -263,7 +414,7 @@ export default function Scanner({ onResult }) {
             <select
               value={docType}
               onChange={(e) => setDocType(e.target.value)}
-              className="w-full appearance-none rounded-xl border border-line bg-panel px-4 py-3 pr-10 text-sm font-medium text-slate-100 outline-none transition-colors focus:border-cyan-500/60"
+              className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 pr-10 text-sm font-medium text-slate-100 outline-none transition-colors focus:border-cyan-500/60"
             >
               {DOC_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -286,13 +437,13 @@ export default function Scanner({ onResult }) {
         <div>
           <label className="mb-1.5 flex items-center gap-2 font-mono text-[11px] font-medium tracking-wider text-slate-500 uppercase">
             Simulation Mode
-            <span className={`h-1.5 w-1.5 rounded-full ${SIM_STYLE[simMode].dot}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${SIM_STYLE[simMode]?.dot || "bg-cyan-400"}`} />
           </label>
           <div className="relative">
             <select
               value={simMode}
               onChange={(e) => setSimMode(e.target.value)}
-              className="w-full appearance-none rounded-xl border border-line bg-panel px-4 py-3 pr-10 text-sm font-medium text-slate-100 outline-none transition-colors focus:border-cyan-500/60"
+              className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 pr-10 text-sm font-medium text-slate-100 outline-none transition-colors focus:border-cyan-500/60"
             >
               {SIM_MODES.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -320,8 +471,8 @@ export default function Scanner({ onResult }) {
               status === "running"
                 ? "cursor-wait bg-cyan-500/20 text-cyan-200"
                 : hasInput
-                  ? "bg-gradient-to-r from-cyan-500 to-emerald-500 text-ink shadow-[0_0_30px_rgba(34,211,238,0.35)] hover:shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:brightness-110 disabled:opacity-40"
-                  : "cursor-not-allowed bg-panel-2 text-slate-500 ring-1 ring-line"
+                ? "bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 shadow-[0_0_30px_rgba(34,211,238,0.35)] hover:shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:brightness-110 disabled:opacity-40"
+                : "cursor-not-allowed bg-slate-800 text-slate-500 ring-1 ring-slate-700"
             }`}
           >
             {status === "running" ? (
@@ -342,19 +493,19 @@ export default function Scanner({ onResult }) {
               </>
             )}
           </button>
-          <p className="mt-2 text-center font-mono text-[11px] text-slate-600 sm:text-left">
+          <p className="mt-2 text-center font-mono text-[11px] text-slate-500 sm:text-left">
             {status === "running"
               ? PHASES[phase].label + "…"
               : status === "done"
-                ? `Last scan: ${(elapsed / 1000).toFixed(2)}s — engine v2.4.1 · 214 signals`
-                : "Encrypted upload · zero retention after analysis"}
+              ? `Last scan: ${(elapsed / 1000).toFixed(2)}s — engine v2.4.1 · 214 signals`
+              : "Encrypted upload · zero retention after analysis"}
           </p>
         </div>
       </div>
 
       {/* Phase tracker */}
       {status !== "idle" && (
-        <div className="mt-5 rounded-2xl border border-line bg-panel/80 p-5">
+        <div className="mt-5 rounded-2xl border border-slate-700 bg-slate-900/80 p-5">
           <div className="mb-4 flex items-center justify-between">
             <span className="font-mono text-[11px] font-medium tracking-widest text-slate-500 uppercase">
               {status === "done" ? "Analysis Complete" : "Forensic Pipeline"}
@@ -364,43 +515,28 @@ export default function Scanner({ onResult }) {
             </span>
           </div>
 
-          {/* Progress bar */}
-          <div className="mb-5 h-1.5 overflow-hidden rounded-full bg-panel-2">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${status === "done" ? "bg-emerald-400" : "shimmer-bar"}`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          <div className="mb-5 h-1.5 overflow-hidden rounded-full bg-slate-800" />
 
           <div className="grid gap-2 sm:grid-cols-2">
             {PHASES.map((p, i) => {
-              const state = status === "done" || i < phase ? "done" : i === phase ? "active" : "pending";
+              const state = phase > i ? "done" : phase === i ? "active" : "pending";
               return (
-                <div
-                  key={p.label}
-                  className={`flex items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors ${
-                    state === "active"
-                      ? "border-cyan-500/40 bg-cyan-500/5"
-                      : state === "done"
-                        ? "border-emerald-500/25 bg-emerald-500/5"
-                        : "border-line bg-panel-2/50 opacity-55"
-                  }`}
-                >
+                <div key={p.id || i} className="flex items-start gap-3">
                   <span
                     className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
                       state === "done"
                         ? "bg-emerald-500/20 text-emerald-400"
                         : state === "active"
-                          ? "bg-cyan-500/20 text-cyan-300"
-                          : "bg-panel text-slate-500"
+                        ? "bg-cyan-500/20 text-cyan-300"
+                        : "bg-slate-800 text-slate-500"
                     }`}
                   >
-                    {state === "done" ? "✓" : state === "active" ? <span className="h-2 w-2 animate-ping rounded-full bg-cyan-300" /> : i + 1}
+                    {state === "done" ? "✓" : state === "active" ? <span className="h-2 w-2 animate-ping rounded-full bg-cyan-400" /> : i + 1}
                   </span>
                   <div>
                     <p className={`text-[13px] font-semibold ${state === "pending" ? "text-slate-400" : "text-slate-100"}`}>
                       {p.label}
-                      {state === "active" && <span className="text-cyan-400">…</span>}
+                      {state === "active" && <span className="text-cyan-400">...</span>}
                     </p>
                     <p className="mt-0.5 text-[11px] text-slate-500">{p.sub}</p>
                   </div>

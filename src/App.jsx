@@ -105,7 +105,7 @@ export default function App() {
         {view === "scan" && (
           <>
             <Hero />
-            <div className="mt-8">
+           <div className="mt-8 min-h-[500px] pb-16">
               <Scanner onResult={handleResult} />
               {scan && (
                 <ResultsView

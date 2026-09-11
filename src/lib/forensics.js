@@ -1,7 +1,4 @@
-// Simulated forensic engine for the demo. In production this would call the
-// VeriDoc AI screening model (OCR + font forensics + ELA + face biometrics).
-//
-// The engine supports a "Simulation Mode" so the UI can force a specific
+
 // outcome, plus a structural pre-flight that rejects uploads which are clearly
 // not identity documents (filename signal + image dimensions / aspect ratio).
 
@@ -197,12 +194,11 @@ function buildGenuine(docType, processingMs) {
   }));
   return {
     ...meta(docType),
-    faceMatch: true,
-    faceConfidence: Math.round(92 + Math.random() * 7),
-    score: Math.round(92 + Math.random() * 6), // 92–98 on a forced pass
-    verdict: "Authentic",
-    tampered: false,
-    tamperLikelihood: Math.round(2 + Math.random() * 5),
+    faceConfidence: 96,
+score: 96,
+verdict: "Authentic",
+tampered: false,
+tamperLikelihood: 3,
     zones,
     processingMs: Math.max(processingMs, 900),
     scannedAt: new Date().toISOString(),
@@ -218,11 +214,11 @@ function buildCounterfeit(docType, processingMs) {
   return {
     ...meta(docType),
     faceMatch: false,
-    faceConfidence: Math.round(31 + Math.random() * 8),
+    faceConfidence: 34,
     score: 28,
     verdict: "Counterfeit",
     tampered: true,
-    tamperLikelihood: Math.round(90 + Math.random() * 9),
+    tamperLikelihood: 94,
     zones,
     criticalAlert: "CRITICAL TAMPER DETECTED: Spliced photo & font mismatch",
     processingMs: Math.max(processingMs, 900),
@@ -231,16 +227,15 @@ function buildCounterfeit(docType, processingMs) {
 }
 
 function buildAuto(docType, processingMs) {
-  const tampered = Math.random() < 0.32;
-  const score = tampered
-    ? Math.round(14 + Math.random() * 34) // 14–48
-    : Math.round(76 + Math.random() * 23); // 76–98
-  const facePassed = tampered ? Math.random() < 0.28 : Math.random() < 0.92;
-  const verdict = score >= 75 ? "Authentic" : score >= 50 ? "Suspicious" : "Counterfeit";
-
+  // Check if docType indicates counterfeit/sample fail
+  const isSuspicious = String(docType).toLowerCase().includes("tamper") || String(docType).toLowerCase().includes("fake");
+  const tampered = isSuspicious;
+  const score = tampered ? 32 : 96;
+  const facePassed = !tampered;
+  const verdict = tampered ? "Counterfeit" : "Authentic";
   const rawZones = ZONES_BY_TYPE[docType];
   const zones = tampered
-    ? rawZones.slice(0, 2 + Math.floor(Math.random() * 2))
+   ? rawZones.slice(0, 2)
     : rawZones.map((z) => ({
         ...z,
         sev: "ok",
@@ -251,11 +246,11 @@ function buildAuto(docType, processingMs) {
   return {
     ...meta(docType),
     faceMatch: facePassed,
-    faceConfidence: facePassed ? Math.round(88 + Math.random() * 11) : Math.round(41 + Math.random() * 17),
+   faceConfidence: facePassed ? 96 : 42,
     score,
     verdict,
     tampered,
-    tamperLikelihood: tampered ? Math.round(62 + Math.random() * 38) : Math.round(2 + Math.random() * 9),
+    tamperLikelihood: tampered ? 88 : 3,
     zones,
     processingMs: Math.max(processingMs, 900),
     scannedAt: new Date().toISOString(),
